@@ -240,10 +240,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                     self.isLoading = false
                     self.isPlaying = false
                     self.updateNowPlayingProgress()
-                    Task {
-                        try? await Task.sleep(nanoseconds: 1_500_000_000)
-                        self.skipNext()
-                    }
+                    HUDService.shared.show(icon: "exclamationmark.circle", iconColor: .orange, title: "Error de audio", subtitle: "No se pudo cargar la pista")
                 }
                 return
             }
@@ -256,10 +253,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                 self.isLoading = false
                 self.isPlaying = false
                 self.updateNowPlayingProgress()
-                Task {
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    self.skipNext()
-                }
+                HUDService.shared.show(icon: "exclamationmark.circle", iconColor: .orange, title: "Error de audio", subtitle: "Stream no disponible")
             }
             return
         }
@@ -370,18 +364,18 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                 AVURLAssetPreferPreciseDurationAndTimingKey: false
             ])
             let item = AVPlayerItem(asset: asset)
-            item.preferredForwardBufferDuration = 1.0
+            item.preferredForwardBufferDuration = 0
             item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
             item.audioTimePitchAlgorithm = .timeDomain
             self.playerItem = item
 
             if let p = self.player {
                 p.replaceCurrentItem(with: item)
-                p.automaticallyWaitsToMinimizeStalling = false
+                p.automaticallyWaitsToMinimizeStalling = true
                 p.volume = 1.0
             } else {
                 let avPlayer = AVPlayer(playerItem: item)
-                avPlayer.automaticallyWaitsToMinimizeStalling = false
+                avPlayer.automaticallyWaitsToMinimizeStalling = true
                 avPlayer.volume = 1.0
                 self.player = avPlayer
             }
@@ -408,11 +402,11 @@ public final class AudioPlayerService: NSObject, ObservableObject {
 
             if let p = self.player {
                 p.replaceCurrentItem(with: item)
-                p.automaticallyWaitsToMinimizeStalling = false
+                p.automaticallyWaitsToMinimizeStalling = true
                 p.volume = 1.0
             } else {
                 let avPlayer = AVPlayer(playerItem: item)
-                avPlayer.automaticallyWaitsToMinimizeStalling = false
+                avPlayer.automaticallyWaitsToMinimizeStalling = true
                 avPlayer.volume = 1.0
                 self.player = avPlayer
             }
@@ -458,14 +452,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                     self.isPlaying = false
                     self.updateNowPlayingProgress()
                     print("[AudioPlayerService] AVPlayerItem failed: \(observedItem.error?.localizedDescription ?? "unknown error")")
-                    // If stream fails, gracefully advance to next track after brief delay
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 1_500_000_000)
-                        if !self.isPlaying && self.isLoading == false {
-                            print("[AudioPlayerService] Stream failed, skipping to next track...")
-                            self.skipNext()
-                        }
-                    }
+                    HUDService.shared.show(icon: "exclamationmark.circle", iconColor: .orange, title: "Error de audio", subtitle: "No se pudo reproducir este formato")
                 case .unknown:
                     break
                 @unknown default:
@@ -507,9 +494,8 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                     self.updateCurrentLyric(for: cur)
                     DJEngineService.shared.checkTransition(currentTime: cur, duration: self.duration)
 
-                    // Auto-advance guard: As soon as the real song audio duration is reached,
-                    // immediately advance to next track! This completely fixes the 3-4 minutes of dead silence.
-                    if !self.hasTriggeredTrackEnd && self.duration > 0 && cur >= (self.duration - 0.75) {
+                    // Auto-advance guard: only when song has actively played and truly reaches the end
+                    if !self.hasTriggeredTrackEnd && self.duration > 15.0 && cur > 15.0 && cur >= (self.duration - 0.5) {
                         self.hasTriggeredTrackEnd = true
                         print("[AudioPlayerService] Song finished naturally at \(cur)s (duration: \(self.duration)s). Auto-advancing...")
                         if SleepTimerService.shared.currentOption == .endOfSong && SleepTimerService.shared.isActive {
@@ -554,7 +540,8 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
         DJEngineService.shared.resetTransition()
 
-        // Retain player instance to reuse via replaceCurrentItem (saves 100-200ms per switch!)
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
         playerItem = nil
     }
 

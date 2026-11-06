@@ -230,7 +230,14 @@ public struct PlayerView: View {
                                     accentColor: theme.activeAccentColor
                                 )
                             case .djLivi:
-                                DJLiviHolographicSphere(diameter: 250, showDynamicPill: true)
+                                // Comentado temporalmente: fallback a modern artwork
+                                ConvxBreathingArtwork(
+                                    urlString: player.currentTrack?.thumbnail,
+                                    songId: player.currentTrack?.id,
+                                    isPlaying: player.isPlaying,
+                                    size: 260,
+                                    accentColor: theme.activeAccentColor
+                                )
                             }
 
                             // Micro-interaction: Double tap heart explosion overlay
@@ -431,10 +438,9 @@ public struct PlayerView: View {
 
                     Spacer()
 
-                    // DJ Livi AI Curator Fast Trigger / Shift
-                    DJLiviFloatingButton()
-
-                    Spacer()
+                    // DJ Livi AI Curator Fast Trigger / Shift (Comentado temporalmente)
+                    // DJLiviFloatingButton()
+                    // Spacer()
 
                     // AirPlay
                     Button(action: {
@@ -494,9 +500,9 @@ public struct PlayerView: View {
                 AlbumDetailView(albumId: album.id, initialTitle: album.name, initialArtist: track.artistNames, initialThumbnail: track.thumbnail)
             }
         }
-        .sheet(isPresented: $livi.isSheetPresented) {
-            DJLiviChatSheet()
-        }
+        // .sheet(isPresented: $livi.isSheetPresented) {
+        //     DJLiviChatSheet()
+        // }
         .onReceive(NotificationCenter.default.publisher(for: .deviceDidShake)) { _ in
             if theme.shakeToShuffleEnabled {
                 UIImpactFeedbackGenerator(style: .rigid).impactOccurred()

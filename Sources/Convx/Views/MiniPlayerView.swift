@@ -56,13 +56,13 @@ public struct MiniPlayerView: View {
 
                                 ConvxMiniEqualizerView(isPlaying: player.isPlaying, accentColor: theme.activeAccentColor)
 
-                                if livi.isDJSessionActive {
-                                    Image(systemName: "sparkles")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundColor(voice.isSpeaking ? Color(red: 1.0, green: 0.15, blue: 0.65) : theme.activeAccentColor)
-                                        .scaleEffect(voice.isSpeaking ? 1.3 : 1.0)
-                                        .animation(.easeInOut(duration: 0.35).repeatForever(autoreverses: true), value: voice.isSpeaking)
-                                }
+                                // if livi.isDJSessionActive {
+                                //     Image(systemName: "sparkles")
+                                //         .font(.system(size: 10, weight: .bold))
+                                //         .foregroundColor(voice.isSpeaking ? Color(red: 1.0, green: 0.15, blue: 0.65) : theme.activeAccentColor)
+                                //         .scaleEffect(voice.isSpeaking ? 1.3 : 1.0)
+                                //         .animation(.easeInOut(duration: 0.35).repeatForever(autoreverses: true), value: voice.isSpeaking)
+                                // }
                             }
 
                             Text(track.artistNames)

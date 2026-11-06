@@ -475,6 +475,7 @@ public struct SettingsView: View {
                             .padding(.horizontal, 20)
                         }
 
+                        /*
                         // 5. ASISTENTE Y CURADORA DJ LIVI
                         VStack(alignment: .leading, spacing: 10) {
                             Text("ASISTENTE Y CURADORA DJ LIVI")
@@ -566,6 +567,7 @@ public struct SettingsView: View {
                             .liquidGlass(cornerRadius: 18, opacity: 0.65)
                             .padding(.horizontal, 20)
                         }
+                        */
 
                         // 6. MODULADOR NEUROACÚSTICO (BINAURAL BEATS)
                         VStack(alignment: .leading, spacing: 10) {

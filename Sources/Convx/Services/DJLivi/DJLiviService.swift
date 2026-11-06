@@ -175,7 +175,7 @@ public final class DJLiviService: ObservableObject {
 
     private init() {
         setupWelcomeMessage()
-        observePlayback()
+        // observePlayback() // Comentado para evitar que interfiera con la reproducción normal
     }
 
     private func setupWelcomeMessage() {
