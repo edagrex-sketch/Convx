@@ -32,6 +32,9 @@ public final class AudioPlayerService: NSObject, ObservableObject {
     private var authoritativeDuration: Double = 0.0
     private var hasTriggeredTrackEnd: Bool = false
     private var streamUrlCache: [String: InnerTubeService.StreamInfo] = [:]
+    private var prefetchTask: Task<Void, Never>?
+    private var lyricsTask: Task<Void, Never>?
+    private var watchdogTask: Task<Void, Never>?
 
     private let innerTube = InnerTubeService.shared
     private let saavn = SaavnService.shared
@@ -127,6 +130,12 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         // 1. Cancel previous download and playback
         currentDownloadTask?.cancel()
         currentDownloadTask = nil
+        prefetchTask?.cancel()
+        prefetchTask = nil
+        lyricsTask?.cancel()
+        lyricsTask = nil
+        watchdogTask?.cancel()
+        watchdogTask = nil
         cleanupPlayer()
 
         // 2. Update Queue
@@ -159,22 +168,37 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         // 4. Update Lock Screen / Control Center immediately with pending metadata
         updateNowPlayingMetadata(for: track)
 
-        // 5. Fetch Synced Lyrics in background (deferred 800ms to preserve full network pipe for instant audio)
-        Task {
-            try? await Task.sleep(nanoseconds: 800_000_000)
+        // 5. Fetch Synced Lyrics in background (deferred 1.2s to preserve full network pipe for instant audio)
+        lyricsTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard let self = self, !Task.isCancelled, self.currentTrack?.id == track.id else { return }
             let fetchedLyrics = await self.innerTube.getLyrics(
                 videoId: track.id,
                 title: track.title,
                 artist: track.artistNames,
                 duration: track.duration ?? 180
             )
+            guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
             await MainActor.run {
                 self.lyrics = fetchedLyrics
                 self.updateCurrentLyric(for: self.currentTime)
             }
         }
 
-        // 6. Start audio resolution pipeline immediately
+        // 6. Stall Watchdog (Guarantees loading state unfreezes after max 4.5s)
+        watchdogTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 4_500_000_000)
+            guard let self = self, !Task.isCancelled, self.currentTrack?.id == track.id else { return }
+            await MainActor.run {
+                if self.isLoading && !self.isPlaying {
+                    print("[AudioPlayerService] Playback watchdog fired: clearing stuck loading state...")
+                    self.isLoading = false
+                    self.player?.play()
+                }
+            }
+        }
+
+        // 7. Start audio resolution pipeline immediately
         let targetFileURL = cacheDirectory.appendingPathComponent("\(track.id).m4a")
         currentDownloadTask = Task { [weak self] in
             guard let self = self else { return }
@@ -194,6 +218,8 @@ public final class AudioPlayerService: NSObject, ObservableObject {
     }
 
     private func resolveAndPlayAudio(track: SongItem, localURL: URL) async {
+        guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
+
         // --- PRIORITY 0: Check Downloaded Offline Song (Instant 0ms Airplane-Mode Playback) ---
         if let downloadedFileURL = DownloadService.shared.localFileURL(for: track.id) {
             print("[AudioPlayerService] INSTANT OFFLINE PLAYBACK from verified downloads: \(downloadedFileURL.path)")
@@ -212,9 +238,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                     prefetchNextTrack(currentIndex: self.queueIndex)
                     return
                 } else {
-                    // Remove partial/truncated 30s file from earlier runs
                     try? FileManager.default.removeItem(at: localURL)
-                    print("[AudioPlayerService] Removed partial cached file (< 1.5MB): \(localURL.lastPathComponent)")
                 }
             }
         }
@@ -223,18 +247,18 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         var streamInfo: InnerTubeService.StreamInfo? = streamUrlCache[track.id]
 
         if streamInfo == nil {
-            // YouTube stream with resilient fallback pipeline (VISIONOS -> Alt YouTube -> JioSaavn -> IOS)
             print("[AudioPlayerService] Resolving audio stream for \(track.title)...")
             do {
-                streamInfo = try await innerTube.getStreamInfo(
+                let resolved = try await innerTube.getStreamInfo(
                     videoId: track.id,
                     title: track.title,
                     artist: track.artistNames
                 )
-                if let resolved = streamInfo {
-                    streamUrlCache[track.id] = resolved
-                }
+                guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
+                streamUrlCache[track.id] = resolved
+                streamInfo = resolved
             } catch {
+                guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
                 print("[AudioPlayerService] Failed to get stream URL: \(error)")
                 await MainActor.run {
                     self.isLoading = false
@@ -247,6 +271,8 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         } else {
             print("[AudioPlayerService] HIT pre-resolved stream cache for \(track.title)! Instant playback!")
         }
+
+        guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
 
         guard let finalInfo = streamInfo else {
             await MainActor.run {
@@ -276,78 +302,43 @@ public final class AudioPlayerService: NSObject, ObservableObject {
             }
         }
 
-        // 1. Start direct streaming immediately - starts in <100ms with lean buffers!
+        guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
+
+        // Start direct streaming immediately
         print("[AudioPlayerService] Starting direct AVPlayer stream for \(track.title)...")
         await playDirectStreamURL(url: streamUrl, initialDuration: Double(track.duration ?? 180))
 
-        // 2. Pre-fetch next track in queue so next song switch is instantaneous!
+        // Pre-fetch next tracks in queue so upcoming skips have 0ms latency
         prefetchNextTrack(currentIndex: self.queueIndex)
-
-        // 3. In background, download complete track to local cache for instant replay next time
-        Task.detached(priority: .background) {
-            do {
-                let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
-                var req = URLRequest(url: streamUrl)
-                req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-                let (data, response) = try await URLSession.shared.data(for: req)
-                if let httpResponse = response as? HTTPURLResponse,
-                   httpResponse.statusCode == 200 || httpResponse.statusCode == 206,
-                   data.count > 1_000_000 {
-                    try data.write(to: localURL, options: .atomic)
-                    print("[AudioPlayerService] Successfully cached full track (\(data.count) bytes) to \(localURL.lastPathComponent)")
-                }
-            } catch {
-                print("[AudioPlayerService] Background track caching failed: \(error)")
-            }
-        }
     }
 
-    // MARK: - Next Track Pre-Fetching & Pre-Buffering (<50ms switching)
+    // MARK: - Next Track Pre-Fetching (Pre-resolves stream URLs for <50ms switching without network congestion)
     private func prefetchNextTrack(currentIndex: Int) {
+        prefetchTask?.cancel()
         let upcomingIndices = [currentIndex + 1, currentIndex + 2]
 
-        for idx in upcomingIndices {
-            guard idx < queue.count else { continue }
-            let nextTrack = queue[idx]
+        prefetchTask = Task { [weak self] in
+            guard let self = self else { return }
+            for idx in upcomingIndices {
+                guard !Task.isCancelled else { return }
+                guard idx < self.queue.count else { continue }
+                let nextTrack = self.queue[idx]
 
-            let targetFileURL = cacheDirectory.appendingPathComponent("\(nextTrack.id).m4a")
-            let fileAlreadyOnDisk = FileManager.default.fileExists(atPath: targetFileURL.path)
-            let isDownloaded = DownloadService.shared.isDownloaded(nextTrack.id)
-
-            if isDownloaded && fileAlreadyOnDisk { continue }
-
-            Task.detached(priority: .utility) { [weak self] in
-                guard let self = self else { return }
-                do {
-                    var streamInfo = await MainActor.run { self.streamUrlCache[nextTrack.id] }
-
-                    if streamInfo == nil {
-                        print("[AudioPlayerService] Background pre-fetching next track: \(nextTrack.title)...")
-                        let resolved = try await InnerTubeService.shared.getStreamInfo(
+                if self.streamUrlCache[nextTrack.id] == nil {
+                    do {
+                        print("[AudioPlayerService] Background pre-resolving URL for next track: \(nextTrack.title)...")
+                        let resolved = try await self.innerTube.getStreamInfo(
                             videoId: nextTrack.id,
                             title: nextTrack.title,
                             artist: nextTrack.artistNames
                         )
+                        guard !Task.isCancelled else { return }
                         await MainActor.run {
                             self.streamUrlCache[nextTrack.id] = resolved
                         }
-                        streamInfo = resolved
+                    } catch {
+                        print("[AudioPlayerService] Pre-resolve for \(nextTrack.title) finished: \(error.localizedDescription)")
                     }
-
-                    // Pre-cache audio file to disk for instant 0ms switching
-                    if let info = streamInfo, !fileAlreadyOnDisk {
-                        var req = URLRequest(url: info.url)
-                        req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
-                        let (data, response) = try await URLSession.shared.data(for: req)
-                        if let httpResponse = response as? HTTPURLResponse,
-                           (httpResponse.statusCode == 200 || httpResponse.statusCode == 206),
-                           data.count > 1_000_000 {
-                            try data.write(to: targetFileURL, options: .atomic)
-                            print("[AudioPlayerService] Pre-cached upcoming track (\(data.count) bytes) to disk: \(nextTrack.title)")
-                        }
-                    }
-                } catch {
-                    print("[AudioPlayerService] Pre-fetch for \(nextTrack.title) finished with note: \(error)")
                 }
             }
         }
@@ -364,7 +355,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                 AVURLAssetPreferPreciseDurationAndTimingKey: false
             ])
             let item = AVPlayerItem(asset: asset)
-            item.preferredForwardBufferDuration = 0
+            item.preferredForwardBufferDuration = 1.0
             item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
             item.audioTimePitchAlgorithm = .timeDomain
             self.playerItem = item
@@ -385,8 +376,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
             }
 
             self.attachObservers(to: self.player!, item: item)
-            let speed = SleepTimerService.shared.selectedSpeed.rate
-            self.player?.playImmediately(atRate: speed)
+            self.player?.play()
         }
     }
 
@@ -416,8 +406,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
             }
 
             self.attachObservers(to: self.player!, item: item)
-            let speed = SleepTimerService.shared.selectedSpeed.rate
-            self.player?.playImmediately(atRate: speed)
+            self.player?.play()
         }
     }
 
@@ -443,13 +432,20 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                     self.isLoading = false
                     self.isPlaying = true
                     let speed = SleepTimerService.shared.selectedSpeed.rate
-                    self.player?.playImmediately(atRate: speed)
+                    if speed != 1.0 {
+                        self.player?.rate = speed
+                    } else {
+                        self.player?.play()
+                    }
                     self.updateNowPlayingProgress()
                     BrainwaveModulatorService.shared.adaptCarrierToCurrentSong()
                     print("[AudioPlayerService] AVPlayerItem readyToPlay! Duration: \(self.duration)s")
                 case .failed:
                     self.isLoading = false
                     self.isPlaying = false
+                    if let curId = self.currentTrack?.id {
+                        self.streamUrlCache.removeValue(forKey: curId)
+                    }
                     self.updateNowPlayingProgress()
                     print("[AudioPlayerService] AVPlayerItem failed: \(observedItem.error?.localizedDescription ?? "unknown error")")
                     HUDService.shared.show(icon: "exclamationmark.circle", iconColor: .orange, title: "Error de audio", subtitle: "No se pudo reproducir este formato")
@@ -472,9 +468,10 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                     self.updateNowPlayingProgress()
                 case .paused:
                     self.isPlaying = false
+                    self.isLoading = false
                     self.updateNowPlayingProgress()
                 case .waitingToPlayAtSpecifiedRate:
-                    if self.currentTime == 0 {
+                    if self.currentTime == 0 && !self.isPlaying {
                         self.isLoading = true
                     }
                 @unknown default:
@@ -528,6 +525,9 @@ public final class AudioPlayerService: NSObject, ObservableObject {
     }
 
     private func cleanupPlayer() {
+        watchdogTask?.cancel()
+        watchdogTask = nil
+
         if let token = timeObserverToken {
             player?.removeTimeObserver(token)
             timeObserverToken = nil
@@ -541,7 +541,6 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         DJEngineService.shared.resetTransition()
 
         player?.pause()
-        player?.replaceCurrentItem(with: nil)
         playerItem = nil
     }
 

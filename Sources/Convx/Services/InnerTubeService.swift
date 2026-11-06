@@ -602,10 +602,14 @@ public final class InnerTubeService: Sendable {
         let songs = parseSearchSongs(from: json)
         let candidates = songs.filter { $0.id != originalVideoId }
 
-        for candidate in candidates.prefix(6) {
+        for candidate in candidates.prefix(3) {
             print("[InnerTubeService] Testing candidate alternative: '\(candidate.title)' (\(candidate.id))...")
+            if let iosInfo = try? await getIOSClientStreamInfo(videoId: candidate.id) {
+                print("[InnerTubeService] Selected fast iOS client alternative: '\(candidate.title)' (\(candidate.id))")
+                return iosInfo
+            }
             if let visionInfo = await getVisionOSStreamInfo(videoId: candidate.id) {
-                print("[InnerTubeService] Selected playable alternative: '\(candidate.title)' (\(candidate.id))")
+                print("[InnerTubeService] Selected VISIONOS alternative: '\(candidate.title)' (\(candidate.id))")
                 return visionInfo
             }
         }
