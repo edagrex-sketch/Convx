@@ -210,6 +210,11 @@ public struct SearchView: View {
                                     playlistsResultView
                                 }
                             } else {
+                                // 🔮 Prompt-to-Music Vibe Radio Generator & Sound Capsules
+                                VibeRadioPromptBar()
+                                    .padding(.horizontal, 18)
+                                    .padding(.bottom, 14)
+
                                 // Default trending search categories
                                 defaultCategoriesView
                             }

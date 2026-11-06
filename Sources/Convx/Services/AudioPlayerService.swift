@@ -451,6 +451,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                     let speed = SleepTimerService.shared.selectedSpeed.rate
                     self.player?.playImmediately(atRate: speed)
                     self.updateNowPlayingProgress()
+                    BrainwaveModulatorService.shared.adaptCarrierToCurrentSong()
                     print("[AudioPlayerService] AVPlayerItem readyToPlay! Duration: \(self.duration)s")
                 case .failed:
                     self.isLoading = false
@@ -504,6 +505,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                 Task { @MainActor in
                     self.currentTime = cur
                     self.updateCurrentLyric(for: cur)
+                    DJEngineService.shared.checkTransition(currentTime: cur, duration: self.duration)
 
                     // Auto-advance guard: As soon as the real song audio duration is reached,
                     // immediately advance to next track! This completely fixes the 3-4 minutes of dead silence.
@@ -550,6 +552,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         timeControlStatusObserver = nil
 
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
+        DJEngineService.shared.resetTransition()
 
         // Retain player instance to reuse via replaceCurrentItem (saves 100-200ms per switch!)
         playerItem = nil

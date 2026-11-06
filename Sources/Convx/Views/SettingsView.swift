@@ -4,6 +4,10 @@ public struct SettingsView: View {
     @ObservedObject var theme = ThemeManager.shared
     @ObservedObject var sleepTimer = SleepTimerService.shared
     @ObservedObject var player = AudioPlayerService.shared
+    @ObservedObject var dsp = AudiophileDSPService.shared
+    @ObservedObject var dj = DJEngineService.shared
+    @ObservedObject var neuro = BrainwaveModulatorService.shared
+    @ObservedObject var singAlong = SingAlongService.shared
 
     @AppStorage("audioQuality") private var audioQuality = "High (AAC 140 / 320k)"
     @AppStorage("crossfadeSeconds") private var crossfadeSeconds = 3.0
@@ -12,6 +16,8 @@ public struct SettingsView: View {
     // @AppStorage("notchIslandEnabled") private var notchIslandEnabled = true // Temporalmente en pausa
 
     @State private var showingCacheClearedAlert = false
+    @State private var showingDSPSheet = false
+    @State private var showingSingAlongSheet = false
 
     public init() {}
 
@@ -248,31 +254,6 @@ public struct SettingsView: View {
 
                                 Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
 
-                                // Equalizer Profile
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Perfil Acústico / EQ")
-                                            .foregroundColor(.white)
-                                        Text(sleepTimer.selectedPreset.description)
-                                            .font(.system(size: 12))
-                                            .foregroundColor(.white.opacity(0.5))
-                                            .lineLimit(1)
-                                    }
-                                    Spacer()
-                                    Picker("", selection: Binding(
-                                        get: { sleepTimer.selectedPreset },
-                                        set: { sleepTimer.setPreset($0) }
-                                    )) {
-                                        ForEach(EqualizerPreset.allCases) { preset in
-                                            Text(preset.rawValue).tag(preset)
-                                        }
-                                    }
-                                    .tint(theme.activeAccentColor)
-                                }
-                                .padding(16)
-
-                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
-
                                 // Shake to Shuffle
                                 Toggle(isOn: $theme.shakeToShuffleEnabled) {
                                     VStack(alignment: .leading, spacing: 2) {
@@ -285,51 +266,281 @@ public struct SettingsView: View {
                                 }
                                 .tint(theme.activeAccentColor)
                                 .padding(16)
+                            }
+                            .liquidGlass(cornerRadius: 18, opacity: 0.65)
+                            .padding(.horizontal, 20)
+                        }
 
-                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+                        // 3. SUITE DSP AUDIÓFILA & PROCESAMIENTO
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("SUITE DSP AUDIÓFILA (10 BANDAS & ANALÓGICO)")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white.opacity(0.5))
+                                .padding(.horizontal, 24)
 
-                                // AutoMix
-                                Toggle(isOn: $autoMixEnabled) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("AutoMix & DJ Radio")
-                                            .foregroundColor(.white)
-                                        Text("Reabastece la cola con canciones similares")
-                                            .font(.system(size: 12))
-                                            .foregroundColor(.white.opacity(0.5))
-                                    }
-                                }
-                                .tint(theme.activeAccentColor)
-                                .padding(16)
-
-                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
-
-                                // Crossfade
-                                VStack(alignment: .leading, spacing: 8) {
+                            VStack(spacing: 0) {
+                                // Full 10-Band EQ Sheet Launcher
+                                Button(action: {
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                    showingDSPSheet = true
+                                }) {
                                     HStack {
-                                        Text("Crossfade")
-                                            .foregroundColor(.white)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Calibración y Curvas de 10 Bandas")
+                                                .foregroundColor(.white)
+                                            Text("Preset activo: \(dsp.selectedPreset.rawValue)")
+                                                .font(.system(size: 12))
+                                                .foregroundColor(theme.activeAccentColor)
+                                        }
                                         Spacer()
-                                        Text("\(Int(crossfadeSeconds))s")
-                                            .foregroundColor(.white.opacity(0.6))
+                                        Image(systemName: "slider.vertical.3")
+                                            .foregroundColor(theme.activeAccentColor)
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundColor(.white.opacity(0.4))
                                     }
-                                    Slider(value: $crossfadeSeconds, in: 0...12, step: 1)
-                                        .tint(theme.activeAccentColor)
+                                    .padding(16)
+                                }
+
+                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                // Preset Picker
+                                HStack {
+                                    Text("Preset Acústico")
+                                        .foregroundColor(.white)
+                                    Spacer()
+                                    Picker("", selection: Binding(
+                                        get: { dsp.selectedPreset },
+                                        set: { dsp.applyPreset($0) }
+                                    )) {
+                                        ForEach(AudiophileEQPreset.allCases) { preset in
+                                            Text(preset.rawValue).tag(preset)
+                                        }
+                                    }
+                                    .tint(theme.activeAccentColor)
                                 }
                                 .padding(16)
 
                                 Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
 
-                                Toggle(isOn: $harmonicMixingEnabled) {
+                                // Analog Tube Warmth HD2
+                                Toggle(isOn: $dsp.isTubeWarmthEnabled) {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("Mezcla Armónica Camelot")
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "flame.fill")
+                                                .foregroundColor(.orange)
+                                                .font(.system(size: 13))
+                                            Text("Calor Valvular Analógico (HD2)")
+                                                .foregroundColor(.white)
+                                        }
+                                        Text("Distorsión armónica par de triodo 12AX7")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.white.opacity(0.55))
+                                    }
+                                }
+                                .tint(.orange)
+                                .padding(16)
+
+                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                // Crossfeed Binaural
+                                Toggle(isOn: $dsp.isCrossfeedEnabled) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "headphones")
+                                                .foregroundColor(.cyan)
+                                                .font(.system(size: 13))
+                                            Text("Crossfeed Binaural (Bauer/Meier)")
+                                                .foregroundColor(.white)
+                                        }
+                                        Text("Simulación acústica de monitores de estudio")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.white.opacity(0.55))
+                                    }
+                                }
+                                .tint(.cyan)
+                                .padding(16)
+
+                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                // EBU R128
+                                Toggle(isOn: $dsp.isEbuR128Enabled) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "speaker.wave.2.fill")
+                                                .foregroundColor(.green)
+                                                .font(.system(size: 13))
+                                            Text("Normalización EBU R128 / LUFS")
+                                                .foregroundColor(.white)
+                                        }
+                                        Text("Sonoridad uniforme a -14 LUFS con True Peak Guard")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.white.opacity(0.55))
+                                    }
+                                }
+                                .tint(.green)
+                                .padding(16)
+                            }
+                            .liquidGlass(cornerRadius: 18, opacity: 0.65)
+                            .padding(.horizontal, 20)
+                        }
+
+                        // 4. MOTOR SMART DJ & TRANSICIONES
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("MOTOR SMART DJ & TRANSICIONES")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white.opacity(0.5))
+                                .padding(.horizontal, 24)
+
+                            VStack(spacing: 0) {
+                                Toggle(isOn: $dj.isSmartDJEnabled) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Smart DJ Transitions")
                                             .foregroundColor(.white)
-                                        Text("Transiciones fluidas ordenando tonalidades compatibles")
+                                        Text("Mezcla activa según compás y tonalidad")
                                             .font(.system(size: 11))
                                             .foregroundColor(.white.opacity(0.55))
                                     }
                                 }
                                 .tint(theme.activeAccentColor)
                                 .padding(16)
+
+                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Estilo de Transición")
+                                            .foregroundColor(.white)
+                                        Text(dj.selectedStyle.explanation)
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.white.opacity(0.55))
+                                            .lineLimit(2)
+                                    }
+                                    Spacer()
+                                    Picker("", selection: $dj.selectedStyle) {
+                                        ForEach(DJTransitionStyle.allCases) { style in
+                                            Text(style.rawValue).tag(style)
+                                        }
+                                    }
+                                    .tint(theme.activeAccentColor)
+                                }
+                                .padding(16)
+
+                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text("Duración de Transición")
+                                            .foregroundColor(.white)
+                                        Spacer()
+                                        Text(String(format: "%.1fs", dj.transitionDuration))
+                                            .foregroundColor(.white.opacity(0.6))
+                                    }
+                                    Slider(value: $dj.transitionDuration, in: 3.0...8.0, step: 0.5)
+                                        .tint(theme.activeAccentColor)
+                                }
+                                .padding(16)
+
+                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                Toggle(isOn: $dj.hapticDropsEnabled) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Impacto Háptico en el Drop")
+                                            .foregroundColor(.white)
+                                        Text("Vibración sincronizada al entrar la nueva pista")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.white.opacity(0.55))
+                                    }
+                                }
+                                .tint(theme.activeAccentColor)
+                                .padding(16)
+
+                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                Toggle(isOn: $autoMixEnabled) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("AutoMix Vibe Radio")
+                                            .foregroundColor(.white)
+                                        Text("Reabastece la cola con recomendaciones armónicas")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.white.opacity(0.55))
+                                    }
+                                }
+                                .tint(theme.activeAccentColor)
+                                .padding(16)
+                            }
+                            .liquidGlass(cornerRadius: 18, opacity: 0.65)
+                            .padding(.horizontal, 20)
+                        }
+
+                        // 5. MODULADOR NEUROACÚSTICO (BINAURAL BEATS)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("MODULADOR NEUROACÚSTICO (BINAURAL BEATS)")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white.opacity(0.5))
+                                .padding(.horizontal, 24)
+
+                            VStack(spacing: 0) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: neuro.selectedBand.icon)
+                                                .foregroundColor(.indigo)
+                                                .font(.system(size: 13))
+                                            Text("Frecuencia de Onda")
+                                                .foregroundColor(.white)
+                                        }
+                                        Text(neuro.selectedBand.description)
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.white.opacity(0.55))
+                                            .lineLimit(2)
+                                    }
+                                    Spacer()
+                                    Picker("", selection: Binding(
+                                        get: { neuro.selectedBand },
+                                        set: { neuro.setBand($0) }
+                                    )) {
+                                        ForEach(BrainwaveBand.allCases) { band in
+                                            Text(band.rawValue).tag(band)
+                                        }
+                                    }
+                                    .tint(.indigo)
+                                }
+                                .padding(16)
+
+                                if neuro.selectedBand != .off {
+                                    Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        HStack {
+                                            Text("Volumen del Subarmónico")
+                                                .foregroundColor(.white)
+                                            Spacer()
+                                            Text("\(Int(neuro.volume * 100))%")
+                                                .font(.system(size: 12, weight: .bold))
+                                                .foregroundColor(.indigo)
+                                        }
+                                        Slider(value: $neuro.volume, in: 0.1...1.0)
+                                            .tint(.indigo)
+                                    }
+                                    .padding(16)
+
+                                    Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Afinación Musical Automática")
+                                                .foregroundColor(.white)
+                                            Text("Portadora ajustada a \(Int(neuro.currentCarrierHz)) Hz según la tonalidad")
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.indigo)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "checkmark.seal.fill")
+                                            .foregroundColor(.indigo)
+                                    }
+                                    .padding(16)
+                                }
                             }
                             .liquidGlass(cornerRadius: 18, opacity: 0.65)
                             .padding(.horizontal, 20)
@@ -441,6 +652,12 @@ public struct SettingsView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showingDSPSheet) {
+            AudiophileDSPSheet()
+        }
+        .sheet(isPresented: $showingSingAlongSheet) {
+            SingAlongSheet()
         }
         .alert("Caché Liberada", isPresented: $showingCacheClearedAlert) {
             Button("OK", role: .cancel) {}

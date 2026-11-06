@@ -3,6 +3,7 @@ import SwiftUI
 public enum PlayerMode {
     case cover
     case lyrics
+    case visualizer
     case queue
 }
 
@@ -10,6 +11,10 @@ public struct PlayerView: View {
     @ObservedObject var player = AudioPlayerService.shared
     @ObservedObject var theme = ThemeManager.shared
     @ObservedObject var sleepTimer = SleepTimerService.shared
+    @ObservedObject var dsp = AudiophileDSPService.shared
+    @ObservedObject var singAlong = SingAlongService.shared
+    @ObservedObject var dj = DJEngineService.shared
+    @ObservedObject var neuro = BrainwaveModulatorService.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var mode: PlayerMode = .cover
@@ -17,6 +22,8 @@ public struct PlayerView: View {
     @State private var showingInspector = false
     @State private var showingArtistDetail = false
     @State private var showingAlbumDetail = false
+    @State private var showingDSPSheet = false
+    @State private var showingSingAlongSheet = false
     @State private var burstTrigger = 0
 
     public init() {}
@@ -50,20 +57,61 @@ public struct PlayerView: View {
 
                     Spacer()
 
-                    // Sleep Timer Active Pill (if active)
-                    if sleepTimer.isActive {
-                        HStack(spacing: 4) {
-                            Image(systemName: "moon.fill")
-                                .font(.system(size: 10))
-                            Text(sleepTimer.formattedRemainingTime)
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    // Audiophile DSP / Sing-Along Status Pills
+                    HStack(spacing: 8) {
+                        // DSP Equalizer Preset Pill
+                        Button(action: {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            showingDSPSheet = true
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: dsp.selectedPreset.icon)
+                                    .font(.system(size: 10, weight: .bold))
+                                Text(dsp.selectedPreset.rawValue)
+                                    .font(.system(size: 11, weight: .bold))
+                                    .lineLimit(1)
+                            }
+                            .foregroundColor(theme.activeAccentColor)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(theme.activeAccentColor.opacity(0.18))
+                            .clipShape(Capsule())
                         }
-                        .foregroundColor(theme.activeAccentColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(theme.activeAccentColor.opacity(0.18))
-                        .clipShape(Capsule())
-                        .transition(.scale.combined(with: .opacity))
+
+                        // Sing-Along Pill (if active)
+                        if singAlong.isSingAlongEnabled {
+                            Button(action: {
+                                showingSingAlongSheet = true
+                            }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "mic.fill")
+                                        .font(.system(size: 10))
+                                    Text("Karaoke")
+                                        .font(.system(size: 11, weight: .bold))
+                                }
+                                .foregroundColor(.pink)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(Color.pink.opacity(0.2))
+                                .clipShape(Capsule())
+                            }
+                        }
+
+                        // Sleep Timer Active Pill (if active)
+                        if sleepTimer.isActive {
+                            HStack(spacing: 4) {
+                                Image(systemName: "moon.fill")
+                                    .font(.system(size: 10))
+                                Text(sleepTimer.formattedRemainingTime)
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            }
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color.orange.opacity(0.18))
+                            .clipShape(Capsule())
+                            .transition(.scale.combined(with: .opacity))
+                        }
                     }
 
                     Spacer()
@@ -199,6 +247,8 @@ public struct PlayerView: View {
 
                     case .lyrics:
                         ConvxSyncedLyricsView()
+                    case .visualizer:
+                        VisualizerView()
                     case .queue:
                         QueueView()
                     }
@@ -313,8 +363,8 @@ public struct PlayerView: View {
 
                 Spacer(minLength: 10)
 
-                // Bottom Toolbar: Lyrics, AirPlay, Queue
-                HStack {
+                // Bottom Toolbar: Lyrics, 120 FPS Visualizer, Sing-Along, DSP Suite, AirPlay, Queue
+                HStack(spacing: 0) {
                     // Lyrics Toggle
                     Button(action: {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -323,10 +373,56 @@ public struct PlayerView: View {
                         }
                     }) {
                         Image(systemName: "quote.bubble")
-                            .font(.system(size: 20, weight: .semibold))
+                            .font(.system(size: 19, weight: .semibold))
                             .foregroundColor(mode == .lyrics ? theme.activeAccentColor : .white.opacity(0.65))
-                            .frame(width: 40, height: 40)
+                            .frame(width: 38, height: 38)
                             .background(mode == .lyrics ? theme.activeAccentColor.opacity(0.22) : Color.clear)
+                            .clipShape(Circle())
+                    }
+
+                    Spacer()
+
+                    // 120 FPS Real-Time Visualizer
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            mode = (mode == .visualizer) ? .cover : .visualizer
+                        }
+                    }) {
+                        Image(systemName: "waveform.path.ecg")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(mode == .visualizer ? theme.activeAccentColor : .white.opacity(0.65))
+                            .frame(width: 38, height: 38)
+                            .background(mode == .visualizer ? theme.activeAccentColor.opacity(0.22) : Color.clear)
+                            .clipShape(Circle())
+                    }
+
+                    Spacer()
+
+                    // Sing-Along / Karaoke Button
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        showingSingAlongSheet = true
+                    }) {
+                        Image(systemName: singAlong.isSingAlongEnabled ? "mic.fill" : "mic")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundColor(singAlong.isSingAlongEnabled ? .pink : .white.opacity(0.65))
+                            .frame(width: 38, height: 38)
+                            .background(singAlong.isSingAlongEnabled ? Color.pink.opacity(0.25) : Color.clear)
+                            .clipShape(Circle())
+                    }
+
+                    Spacer()
+
+                    // Audiophile DSP Suite Quick Button
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showingDSPSheet = true
+                    }) {
+                        Image(systemName: "slider.vertical.3")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.65))
+                            .frame(width: 38, height: 38)
                             .clipShape(Circle())
                     }
 
@@ -337,9 +433,9 @@ public struct PlayerView: View {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     }) {
                         Image(systemName: "airplayaudio")
-                            .font(.system(size: 19, weight: .semibold))
+                            .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(.white.opacity(0.65))
-                            .frame(width: 40, height: 40)
+                            .frame(width: 38, height: 38)
                     }
 
                     Spacer()
@@ -352,18 +448,24 @@ public struct PlayerView: View {
                         }
                     }) {
                         Image(systemName: "list.bullet")
-                            .font(.system(size: 20, weight: .semibold))
+                            .font(.system(size: 19, weight: .semibold))
                             .foregroundColor(mode == .queue ? theme.activeAccentColor : .white.opacity(0.65))
-                            .frame(width: 40, height: 40)
+                            .frame(width: 38, height: 38)
                             .background(mode == .queue ? theme.activeAccentColor.opacity(0.22) : Color.clear)
                             .clipShape(Circle())
                     }
                 }
-                .padding(.horizontal, 44)
+                .padding(.horizontal, 28)
                 .padding(.bottom, 20)
             }
         }
         .clipped()
+        .sheet(isPresented: $showingDSPSheet) {
+            AudiophileDSPSheet()
+        }
+        .sheet(isPresented: $showingSingAlongSheet) {
+            SingAlongSheet()
+        }
         .sheet(isPresented: $showingAddToPlaylist) {
             if let track = player.currentTrack {
                 AddToPlaylistSheet(song: track)
