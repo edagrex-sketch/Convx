@@ -527,6 +527,14 @@ public struct SearchView: View {
                 let detailed = try await detailedTask
                 results = detailed.songs
                 detectedArtist = detailed.artist
+
+                // Predictive stream pre-warming for instant 0ms start on tap
+                if let first = detailed.songs.first {
+                    AudioPlayerService.shared.prewarmTrack(first)
+                }
+                if detailed.songs.count > 1 {
+                    AudioPlayerService.shared.prewarmTrack(detailed.songs[1])
+                }
             } catch {
                 results = []
                 detectedArtist = nil

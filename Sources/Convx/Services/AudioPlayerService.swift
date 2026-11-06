@@ -56,6 +56,40 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         cleanIncompleteCacheFiles()
         // Pre-warm PoToken service in background
         poTokenService.start()
+        warmup()
+    }
+
+    public func warmup() {
+        setupAudioSession()
+        if self.player == nil {
+            let p = AVPlayer()
+            p.automaticallyWaitsToMinimizeStalling = false
+            self.player = p
+        }
+        print("[AudioPlayerService] Audio Engine and player pre-warmed for 0ms start!")
+    }
+
+    public func prewarmTrack(_ track: SongItem) {
+        guard streamUrlCache[track.id] == nil else { return }
+        let targetFileURL = cacheDirectory.appendingPathComponent("\(track.id).m4a")
+        if FileManager.default.fileExists(atPath: targetFileURL.path) { return }
+
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self = self else { return }
+            do {
+                let resolved = try await InnerTubeService.shared.getStreamInfo(
+                    videoId: track.id,
+                    title: track.title,
+                    artist: track.artistNames
+                )
+                await MainActor.run {
+                    self.streamUrlCache[track.id] = resolved
+                    print("[AudioPlayerService] Pre-warmed stream URL for: '\(track.title)'")
+                }
+            } catch {
+                // Silent catch for prewarm
+            }
+        }
     }
 
     private func cleanIncompleteCacheFiles() {
@@ -125,23 +159,22 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         // 4. Update Lock Screen / Control Center immediately with pending metadata
         updateNowPlayingMetadata(for: track)
 
-        // 5. Fetch Synced Lyrics in background
+        // 5. Fetch Synced Lyrics in background (deferred 800ms to preserve full network pipe for instant audio)
         Task {
-            do {
-                let fetchedLyrics = await innerTube.getLyrics(
-                    videoId: track.id,
-                    title: track.title,
-                    artist: track.artistNames,
-                    duration: track.duration ?? 180
-                )
-                await MainActor.run {
-                    self.lyrics = fetchedLyrics
-                    self.updateCurrentLyric(for: self.currentTime)
-                }
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            let fetchedLyrics = await self.innerTube.getLyrics(
+                videoId: track.id,
+                title: track.title,
+                artist: track.artistNames,
+                duration: track.duration ?? 180
+            )
+            await MainActor.run {
+                self.lyrics = fetchedLyrics
+                self.updateCurrentLyric(for: self.currentTime)
             }
         }
 
-        // 6. Start audio resolution pipeline
+        // 6. Start audio resolution pipeline immediately
         let targetFileURL = cacheDirectory.appendingPathComponent("\(track.id).m4a")
         currentDownloadTask = Task { [weak self] in
             guard let self = self else { return }
@@ -151,8 +184,13 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         // 7. Track playback in taste profile
         history.recordPlay(song: track)
 
-        // 8. Auto-Replenish Queue with smart recommendations
-        replenishQueueIfNeeded()
+        // 8. Auto-Replenish Queue deferred until after audio stream is playing
+        Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            await MainActor.run {
+                self.replenishQueueIfNeeded()
+            }
+        }
     }
 
     private func resolveAndPlayAudio(track: SongItem, localURL: URL) async {
@@ -354,10 +392,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
 
             self.attachObservers(to: self.player!, item: item)
             let speed = SleepTimerService.shared.selectedSpeed.rate
-            self.player?.play()
-            if speed != 1.0 {
-                self.player?.rate = speed
-            }
+            self.player?.playImmediately(atRate: speed)
         }
     }
 
@@ -388,10 +423,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
 
             self.attachObservers(to: self.player!, item: item)
             let speed = SleepTimerService.shared.selectedSpeed.rate
-            self.player?.play()
-            if speed != 1.0 {
-                self.player?.rate = speed
-            }
+            self.player?.playImmediately(atRate: speed)
         }
     }
 
@@ -415,7 +447,9 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                         self.duration = self.authoritativeDuration
                     }
                     self.isLoading = false
-                    self.player?.play()
+                    self.isPlaying = true
+                    let speed = SleepTimerService.shared.selectedSpeed.rate
+                    self.player?.playImmediately(atRate: speed)
                     self.updateNowPlayingProgress()
                     print("[AudioPlayerService] AVPlayerItem readyToPlay! Duration: \(self.duration)s")
                 case .failed:

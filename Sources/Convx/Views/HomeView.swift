@@ -440,6 +440,11 @@ public struct HomeView: View {
                 }
             }
             self.favoriteSongs = favList
+            if let firstFav = favList.first {
+                AudioPlayerService.shared.prewarmTrack(firstFav)
+            } else if let firstRecent = self.recentSongs.first {
+                AudioPlayerService.shared.prewarmTrack(firstRecent)
+            }
         }
 
         // 2. Specific Mood Handler
