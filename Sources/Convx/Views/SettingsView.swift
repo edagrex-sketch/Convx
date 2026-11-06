@@ -8,6 +8,8 @@ public struct SettingsView: View {
     @ObservedObject var dj = DJEngineService.shared
     @ObservedObject var neuro = BrainwaveModulatorService.shared
     @ObservedObject var singAlong = SingAlongService.shared
+    @ObservedObject var livi = DJLiviService.shared
+    @ObservedObject var liviVoice = DJLiviVoiceService.shared
 
     @AppStorage("audioQuality") private var audioQuality = "High (AAC 140 / 320k)"
     @AppStorage("crossfadeSeconds") private var crossfadeSeconds = 3.0
@@ -473,7 +475,99 @@ public struct SettingsView: View {
                             .padding(.horizontal, 20)
                         }
 
-                        // 5. MODULADOR NEUROACÚSTICO (BINAURAL BEATS)
+                        // 5. ASISTENTE Y CURADORA DJ LIVI
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("ASISTENTE Y CURADORA DJ LIVI")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white.opacity(0.5))
+                                .padding(.horizontal, 24)
+
+                            VStack(spacing: 0) {
+                                Toggle(isOn: $liviVoice.isVoiceEnabled) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Voz Neuronal de Livi")
+                                            .foregroundColor(.white)
+                                        Text("Locución de radio contextual con Apple Neural Engine")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.white.opacity(0.55))
+                                    }
+                                }
+                                .tint(theme.activeAccentColor)
+                                .padding(16)
+
+                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Voz Asignada")
+                                            .foregroundColor(.white)
+                                        Text(liviVoice.activeVoiceName)
+                                            .font(.system(size: 11))
+                                            .foregroundColor(theme.activeAccentColor)
+                                    }
+                                    Spacer()
+                                    Button(action: {
+                                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                        Task {
+                                            await liviVoice.speak(text: "¡Qué onda! Soy DJ Livi, tu curadora musical en Convx. Todo listo para mezclar.")
+                                        }
+                                    }) {
+                                        Text("Probar Voz")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundColor(.black)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 5)
+                                            .background(theme.activeAccentColor)
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                                .padding(16)
+
+                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Frecuencia de Locución")
+                                            .foregroundColor(.white)
+                                        Text("Intervención cada \(livi.talkFrequency) canciones")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.white.opacity(0.55))
+                                    }
+                                    Spacer()
+                                    Picker("", selection: $livi.talkFrequency) {
+                                        Text("Cada 2").tag(2)
+                                        Text("Cada 3").tag(3)
+                                        Text("Cada 4").tag(4)
+                                        Text("Cada 5").tag(5)
+                                    }
+                                    .tint(theme.activeAccentColor)
+                                }
+                                .padding(16)
+
+                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                Button(action: {
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                    livi.isSheetPresented = true
+                                }) {
+                                    HStack {
+                                        Image(systemName: "bubble.left.and.bubble.right.fill")
+                                            .foregroundColor(theme.activeAccentColor)
+                                        Text("Abrir Chat con DJ Livi")
+                                            .foregroundColor(.white)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundColor(.white.opacity(0.35))
+                                    }
+                                    .padding(16)
+                                }
+                            }
+                            .liquidGlass(cornerRadius: 18, opacity: 0.65)
+                            .padding(.horizontal, 20)
+                        }
+
+                        // 6. MODULADOR NEUROACÚSTICO (BINAURAL BEATS)
                         VStack(alignment: .leading, spacing: 10) {
                             Text("MODULADOR NEUROACÚSTICO (BINAURAL BEATS)")
                                 .font(.system(size: 12, weight: .bold))

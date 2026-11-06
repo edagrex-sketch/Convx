@@ -74,6 +74,7 @@ public enum PlayerCoverStyle: String, CaseIterable, Identifiable, Codable {
     case modern = "Modern Cover"
     case vinyl = "Retro Vinyl"
     case visualizer = "Spectrum Wave"
+    case djLivi = "DJ Livi Hologram"
 
     public var id: String { rawValue }
 
@@ -82,6 +83,7 @@ public enum PlayerCoverStyle: String, CaseIterable, Identifiable, Codable {
         case .modern:     return "square.fill"
         case .vinyl:      return "opticaldisc"
         case .visualizer: return "waveform"
+        case .djLivi:     return "sparkles"
         }
     }
 }

@@ -45,6 +45,10 @@ public struct HomeView: View {
                         // Mood Pills
                         moodSelectorView
 
+                        // DJ Livi AI Curator Hero Card
+                        DJLiviHeroCard()
+                            .padding(.horizontal, 20)
+
                         // Quick Access Grid (Top 6 Recents / Favorites)
                         if !quickAccessItems.isEmpty {
                             quickAccessGridView

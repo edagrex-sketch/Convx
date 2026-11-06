@@ -749,6 +749,26 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         player?.volume = max(0.0, min(1.0, volume))
     }
 
+    /// Smooth S-curve (cosine Hermite) volume ramp for seamless audio ducking without clicks
+    @MainActor
+    public func rampVolume(to target: Float, duration: TimeInterval) async {
+        guard let p = self.player else { return }
+        let startVolume = p.volume
+        guard abs(startVolume - target) > 0.01 else { return }
+
+        let steps = max(10, Int(duration * 50.0)) // 50 Hz updates
+        let stepDelay = UInt64((duration / Double(steps)) * 1_000_000_000)
+
+        for step in 1...steps {
+            let progress = Double(step) / Double(steps)
+            let eased = Float(0.5 * (1.0 - cos(.pi * progress)))
+            let current = startVolume + (target - startVolume) * eased
+            p.volume = max(0.0, min(1.0, current))
+            try? await Task.sleep(nanoseconds: stepDelay)
+        }
+        p.volume = max(0.0, min(1.0, target))
+    }
+
     // MARK: - Synced Lyrics Tracker
     private func updateCurrentLyric(for time: Double) {
         guard !lyrics.isEmpty else {

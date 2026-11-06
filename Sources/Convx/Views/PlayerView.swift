@@ -15,6 +15,7 @@ public struct PlayerView: View {
     @ObservedObject var singAlong = SingAlongService.shared
     @ObservedObject var dj = DJEngineService.shared
     @ObservedObject var neuro = BrainwaveModulatorService.shared
+    @ObservedObject var livi = DJLiviService.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var mode: PlayerMode = .cover
@@ -228,6 +229,8 @@ public struct PlayerView: View {
                                     isPlaying: player.isPlaying,
                                     accentColor: theme.activeAccentColor
                                 )
+                            case .djLivi:
+                                DJLiviHolographicSphere(diameter: 250, showDynamicPill: true)
                             }
 
                             // Micro-interaction: Double tap heart explosion overlay
@@ -428,6 +431,11 @@ public struct PlayerView: View {
 
                     Spacer()
 
+                    // DJ Livi AI Curator Fast Trigger / Shift
+                    DJLiviFloatingButton()
+
+                    Spacer()
+
                     // AirPlay
                     Button(action: {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -485,6 +493,9 @@ public struct PlayerView: View {
             if let track = player.currentTrack, let album = track.album, !album.id.isEmpty {
                 AlbumDetailView(albumId: album.id, initialTitle: album.name, initialArtist: track.artistNames, initialThumbnail: track.thumbnail)
             }
+        }
+        .sheet(isPresented: $livi.isSheetPresented) {
+            DJLiviChatSheet()
         }
         .onReceive(NotificationCenter.default.publisher(for: .deviceDidShake)) { _ in
             if theme.shakeToShuffleEnabled {
