@@ -14,6 +14,7 @@
 ## ✨ Características Principales
 
 ### 🎨 1. Sistema Sensorial UX/UI & Liquid Glass
+- **Notch Island Adaptativa (iPhone 16e y dispositivos con Notch):** Transforma la muesca de hardware en una isla interactiva. Muestra la portada, título y ecualizador animado en modo compacto justo debajo del notch, y se expande con un toque o gesto hacia abajo en un reproductor rápido con scrubber y controles táctiles.
 - **Lienzo Reactivo a la Carátula (Dynamic Sonic Canvas):** Fondo de malla animado (*MeshGradientBackground*) que respira y se sincroniza armónicamente con la paleta de colores de la canción actual.
 - **Píldora HUD Flotante (Dynamic Island Style):** Cápsula de micro-retroalimentación háptica y visual que desciende desde la parte superior para confirmar acciones clave (*"Agregado a Favoritos"*, *"Reproducir a continuación"*, *"Descargando álbum..."*).
 - **Gesto Ergonómico Swipe-to-Queue:** Desliza cualquier canción en búsquedas, listas o perfiles hacia la derecha para encolarla como siguiente pista con respuesta táctil rígida.

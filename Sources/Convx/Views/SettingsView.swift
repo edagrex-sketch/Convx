@@ -9,6 +9,7 @@ public struct SettingsView: View {
     @AppStorage("crossfadeSeconds") private var crossfadeSeconds = 3.0
     @AppStorage("autoMixEnabled") private var autoMixEnabled = true
     @AppStorage("harmonicMixingEnabled") private var harmonicMixingEnabled = true
+    @AppStorage("notchIslandEnabled") private var notchIslandEnabled = true
 
     @State private var showingCacheClearedAlert = false
 
@@ -156,6 +157,23 @@ public struct SettingsView: View {
                                         }
                                     }
                                     .tint(theme.activeAccentColor)
+                                }
+                                .padding(16)
+
+                                Divider().background(Color.white.opacity(0.12)).padding(.leading, 16)
+
+                                // Notch Island (iPhone 16e & Notch Devices)
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Notch Island (iPhone 16e)")
+                                            .foregroundColor(.white)
+                                        Text("Transforma la notch en una isla interactiva con música en vivo")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.white.opacity(0.5))
+                                    }
+                                    Spacer()
+                                    Toggle("", isOn: $notchIslandEnabled)
+                                        .tint(theme.activeAccentColor)
                                 }
                                 .padding(16)
                             }

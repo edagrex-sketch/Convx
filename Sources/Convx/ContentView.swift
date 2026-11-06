@@ -62,9 +62,7 @@ public struct ContentView: View {
         }
         .clipped()
         .overlay(alignment: .top) {
-            ConvxFloatingHUDView()
-                .padding(.top, 54)
-                .allowsHitTesting(false)
+            ConvxNotchIsland()
         }
         .sheet(isPresented: $player.isPresentingFullPlayer) {
             PlayerView()
