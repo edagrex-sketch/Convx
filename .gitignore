@@ -1,0 +1,38 @@
+# Xcode and Swift Package Manager
+.build/
+.swiftpm/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+*.xcuserstate
+
+# xtool build output (keep xtool/Convx.app if needed or exclude intermediate build artifacts)
+xtool/
+.bsp/
+.xtool-tmp/
+*.ipa
+*.dSYM
+
+# Local audio cache and downloads
+convx_downloads/
+ConvxAudio/
+*.m4a
+*.mp4
+*.aac
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+__pycache__/
+*.pyc
