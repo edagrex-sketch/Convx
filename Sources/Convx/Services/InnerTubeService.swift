@@ -423,6 +423,10 @@ public final class InnerTubeService: Sendable {
                                             durationSeconds = self.parseDuration(durText)
                                         }
 
+                                        if let d = durationSeconds {
+                                            SongDurationStore.shared.set(duration: Double(d), for: vid)
+                                        }
+
                                         let song = SongItem(
                                             id: vid,
                                             title: trackTitle,
@@ -891,6 +895,9 @@ public final class InnerTubeService: Sendable {
             throw URLError(.resourceUnavailable)
         }
 
+        if let dur = formatDuration, dur > 0 {
+            SongDurationStore.shared.set(duration: dur, for: videoId)
+        }
         return StreamInfo(url: targetUrl, duration: formatDuration)
     }
 
@@ -1196,6 +1203,9 @@ public final class InnerTubeService: Sendable {
         }
 
         let album = albumName.map { Album(name: $0, id: albumBrowseId ?? "") }
+        if let d = durationSeconds {
+            SongDurationStore.shared.set(duration: Double(d), for: finalId)
+        }
         return SongItem(id: finalId, title: title, artists: artists, album: album, duration: durationSeconds, thumbnail: thumbUrl)
     }
 
@@ -1239,6 +1249,9 @@ public final class InnerTubeService: Sendable {
             let thumbs = (renderer["thumbnail"] as? [String: Any])?["thumbnails"] as? [[String: Any]]
             let thumbUrl = thumbs?.last?["url"] as? String
 
+            if let d = durationSeconds {
+                SongDurationStore.shared.set(duration: Double(d), for: videoId)
+            }
             songs.append(SongItem(
                 id: videoId,
                 title: title,
@@ -1292,10 +1305,12 @@ public final class InnerTubeService: Sendable {
                             let thumbs = (twoRow["thumbnailRenderer"] as? [String: Any])?["musicThumbnailRenderer"] as? [String: Any]
                             let thumbList = ((thumbs?["thumbnail"] as? [String: Any])?["thumbnails"] as? [[String: Any]])
                             let thumbUrl = thumbList?.last?["url"] as? String
+                            let cachedDur = SongDurationStore.shared.get(for: vid).map { Int($0) }
                             sectionSongs.append(SongItem(
                                 id: vid,
                                 title: title,
                                 artists: [Artist(name: artist)],
+                                duration: cachedDur,
                                 thumbnail: thumbUrl
                             ))
                         }
@@ -1711,6 +1726,9 @@ public final class InnerTubeService: Sendable {
         }
 
         let album = albumName.map { Album(name: $0, id: "") }
+        if let d = durationSeconds {
+            SongDurationStore.shared.set(duration: Double(d), for: finalId)
+        }
         return SongItem(
             id: finalId,
             title: title,

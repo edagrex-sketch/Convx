@@ -42,12 +42,13 @@ public struct DownloadedSong: Identifiable, Codable, Hashable, Sendable {
     }
 
     public func toSongItem() -> SongItem {
-        SongItem(
+        let dur = duration ?? SongDurationStore.shared.get(for: id).map { Int($0) }
+        return SongItem(
             id: id,
             title: title,
             artists: artists,
             album: album,
-            duration: duration,
+            duration: dur,
             thumbnail: thumbnail
         )
     }

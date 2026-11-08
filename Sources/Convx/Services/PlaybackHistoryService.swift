@@ -22,12 +22,18 @@ public struct PlayHistoryItem: Codable, Hashable, Sendable {
     }
 
     public func toSongItem() -> SongItem {
-        if let s = song { return s }
+        let dur = song?.duration ?? SongDurationStore.shared.get(for: songId).map { Int($0) }
+        if var s = song {
+            if s.duration == nil, let d = dur {
+                s.duration = d
+            }
+            return s
+        }
         return SongItem(
             id: songId,
             title: title,
             artists: [Artist(name: artistNames)],
-            duration: nil,
+            duration: dur,
             thumbnail: thumbnail
         )
     }
@@ -50,16 +56,21 @@ public final class PlaybackHistoryService: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
+        var resolvedSong = song
+        if resolvedSong.duration == nil, let known = SongDurationStore.shared.get(for: song.id) {
+            resolvedSong.duration = Int(known)
+        }
+
         // 1. Update Song Record
-        if var existing = historyMap[song.id] {
+        if var existing = historyMap[resolvedSong.id] {
             existing.playCount += 1
             existing.lastPlayedDate = Date()
             existing.durationListened += duration
-            existing.song = song
-            historyMap[song.id] = existing
+            existing.song = resolvedSong
+            historyMap[resolvedSong.id] = existing
         } else {
-            let item = PlayHistoryItem(song: song, durationListened: duration)
-            historyMap[song.id] = item
+            let item = PlayHistoryItem(song: resolvedSong, durationListened: duration)
+            historyMap[resolvedSong.id] = item
         }
 
         // 2. Update Recent List (FIFO, max 40)

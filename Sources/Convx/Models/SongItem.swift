@@ -118,7 +118,7 @@ public struct SongItem: Identifiable, Codable, Hashable, Sendable {
     public let title: String
     public let artists: [Artist]
     public let album: Album?
-    public let duration: Int? // seconds
+    public var duration: Int? // seconds
     public let thumbnail: String?
     public let explicit: Bool
 
