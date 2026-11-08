@@ -32,6 +32,8 @@ public final class AudioPlayerService: NSObject, ObservableObject {
     private var currentDownloadTask: Task<Void, Never>?
     private var authoritativeDuration: Double = 0.0
     private var hasTriggeredTrackEnd: Bool = false
+    private var lastProgressTime: Double = 0.0
+    private var lastProgressDate: Date = Date()
     private var streamUrlCache: [String: InnerTubeService.StreamInfo] = [:]
     private var prefetchTask: Task<Void, Never>?
     private var lyricsTask: Task<Void, Never>?
@@ -160,6 +162,8 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         self.isPlaying = false
         self.currentTime = 0.0
         self.hasTriggeredTrackEnd = false
+        self.lastProgressTime = 0.0
+        self.lastProgressDate = Date()
 
         if let dur = track.duration, dur > 0 {
             self.authoritativeDuration = Double(dur)
@@ -561,17 +565,39 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         self.timeObserverToken = avPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self = self else { return }
             let cur = time.seconds
-            if cur.isFinite {
-                Task { @MainActor in
-                    self.currentTime = cur
-                    self.updateCurrentLyric(for: cur)
-                    DJEngineService.shared.checkTransition(currentTime: cur, duration: self.duration)
+            guard cur.isFinite else { return }
 
-                    // Natural seamless transition when track truly finishes:
-                    // (Handles CoreMedia fMP4 bug where AVPlayer never posts AVPlayerItemDidPlayToEndTime due to internal timescale mismatch)
-                    if !self.hasTriggeredTrackEnd && self.duration > 5.0 && (cur >= (self.duration - 0.2) || (cur >= (self.duration - 1.5) && self.player?.timeControlStatus != .playing)) {
+            Task { @MainActor in
+                self.currentTime = cur
+                self.updateCurrentLyric(for: cur)
+                DJEngineService.shared.checkTransition(currentTime: cur, duration: self.duration)
+
+                // 1. Track actual forward playback progress
+                if cur > self.lastProgressTime + 0.08 {
+                    self.lastProgressTime = cur
+                    self.lastProgressDate = Date()
+                    // Dynamically expand duration if audio is legitimately playing past initial estimate
+                    if cur > self.duration && self.duration > 0 {
+                        self.duration = cur + 0.5
+                        self.authoritativeDuration = self.duration
+                        self.updateNowPlayingProgress()
+                    }
+                }
+
+                // 2. Natural seamless transition when track truly finishes:
+                // Only triggers when within the final tail of the song (or past it) AND playback has stopped advancing.
+                // NEVER cuts off while audio is actively moving forward.
+                guard !self.hasTriggeredTrackEnd, self.duration > 8.0 else { return }
+
+                let isNearEnd = cur >= (self.duration - 2.5)
+                if isNearEnd && self.isPlaying {
+                    let timeSinceProgress = Date().timeIntervalSince(self.lastProgressDate)
+                    let isStreamExhausted = timeSinceProgress >= 0.65 || (cur >= self.duration - 0.05)
+                    let isBufferExhausted = item.isPlaybackBufferEmpty && cur >= (self.duration - 1.5)
+
+                    if isStreamExhausted || isBufferExhausted {
                         self.hasTriggeredTrackEnd = true
-                        print("[AudioPlayerService] Song finished naturally at \(cur)s (duration: \(self.duration)s). Seamlessly advancing to next...")
+                        print("[AudioPlayerService] Song finished naturally at \(cur)s (duration: \(self.duration)s, stall: \(timeSinceProgress)s). Seamlessly advancing to next...")
                         if SleepTimerService.shared.currentOption == .endOfSong && SleepTimerService.shared.isActive {
                             SleepTimerService.shared.handleTrackEndNatural()
                         } else {
@@ -608,6 +634,9 @@ public final class AudioPlayerService: NSObject, ObservableObject {
     private func cleanupPlayer() {
         watchdogTask?.cancel()
         watchdogTask = nil
+
+        lastProgressTime = 0.0
+        lastProgressDate = Date()
 
         if let token = timeObserverToken {
             player?.removeTimeObserver(token)
@@ -667,6 +696,8 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         guard let p = player else { return }
         let clamped = max(0.0, min(seconds, duration))
         self.currentTime = clamped
+        self.lastProgressTime = clamped
+        self.lastProgressDate = Date()
         if clamped < max(0.0, duration - 1.5) {
             self.hasTriggeredTrackEnd = false
         }

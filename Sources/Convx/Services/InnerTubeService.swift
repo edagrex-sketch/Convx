@@ -553,9 +553,9 @@ public final class InnerTubeService: Sendable {
         // Priority 4: JioSaavn Direct 320kbps / 160kbps High Fidelity CDN Stream
         if let title = title, !title.isEmpty {
             let artistStr = artist ?? ""
-            if let saavnUrl = await SaavnService.shared.getStreamUrl(title: title, artist: artistStr) {
-                print("[InnerTubeService] Found Saavn CDN audio stream for '\(title)'!")
-                return StreamInfo(url: saavnUrl, duration: nil)
+            if let saavnRes = await SaavnService.shared.getStreamInfo(title: title, artist: artistStr) {
+                print("[InnerTubeService] Found Saavn CDN audio stream for '\(title)'! Duration: \(saavnRes.duration ?? 0)s")
+                return StreamInfo(url: saavnRes.url, duration: saavnRes.duration)
             }
         }
 
@@ -581,9 +581,9 @@ public final class InnerTubeService: Sendable {
         // Priority 3: JioSaavn Direct 320kbps / 160kbps High Fidelity CDN Stream
         if let title = title, !title.isEmpty {
             let artistStr = artist ?? ""
-            if let saavnUrl = await SaavnService.shared.getStreamUrl(title: title, artist: artistStr) {
-                print("[InnerTubeService] Fallback: Found Saavn CDN audio stream for '\(title)'!")
-                return StreamInfo(url: saavnUrl, duration: nil)
+            if let saavnRes = await SaavnService.shared.getStreamInfo(title: title, artist: artistStr) {
+                print("[InnerTubeService] Fallback: Found Saavn CDN audio stream for '\(title)'! Duration: \(saavnRes.duration ?? 0)s")
+                return StreamInfo(url: saavnRes.url, duration: saavnRes.duration)
             }
         }
 

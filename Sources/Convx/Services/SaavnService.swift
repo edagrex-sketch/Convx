@@ -13,8 +13,13 @@ public final class SaavnService: Sendable {
         self.session = URLSession(configuration: config)
     }
 
-    /// Searches JioSaavn for a matching track and returns a direct 320kbps / 160kbps streaming URL
-    public func getStreamUrl(title: String, artist: String) async -> URL? {
+    public struct SaavnStreamResult: Sendable {
+        public let url: URL
+        public let duration: Double?
+    }
+
+    /// Searches JioSaavn for a matching track and returns a direct 320kbps / 160kbps streaming URL with exact duration
+    public func getStreamInfo(title: String, artist: String) async -> SaavnStreamResult? {
         let cleanTitle = cleanSearchTerm(title)
         let cleanArtist = cleanSearchTerm(artist)
         let query = "\(cleanTitle) \(cleanArtist)".trimmingCharacters(in: .whitespacesAndNewlines)
@@ -64,8 +69,14 @@ public final class SaavnService: Sendable {
 
                 if let decryptedUrl = decryptDES(encryptedBase64: encryptedUrl),
                    let streamUrl = formatStreamUrl(decryptedUrl: decryptedUrl, moreInfo: moreInfo) {
-                    print("[SaavnService] Found high-quality stream for '\(title)': \(streamUrl.absoluteString)")
-                    return streamUrl
+                    var dur: Double? = nil
+                    if let durStr = moreInfo["duration"] as? String, let sec = Double(durStr), sec > 0 {
+                        dur = sec
+                    } else if let durStr = item["duration"] as? String, let sec = Double(durStr), sec > 0 {
+                        dur = sec
+                    }
+                    print("[SaavnService] Found high-quality stream for '\(title)': \(streamUrl.absoluteString) (duration: \(dur ?? 0)s)")
+                    return SaavnStreamResult(url: streamUrl, duration: dur)
                 }
             }
         } catch {
@@ -73,6 +84,11 @@ public final class SaavnService: Sendable {
         }
 
         return nil
+    }
+
+    public func getStreamUrl(title: String, artist: String) async -> URL? {
+        let res = await getStreamInfo(title: title, artist: artist)
+        return res?.url
     }
 
     private func formatStreamUrl(decryptedUrl: String, moreInfo: [String: Any]) -> URL? {
