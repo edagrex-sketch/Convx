@@ -415,12 +415,20 @@ public final class InnerTubeService: Sendable {
                                     let vid = (rend["playlistItemData"] as? [String: Any])?["videoId"] as? String
 
                                     if let vid = vid {
+                                        var durationSeconds: Int?
+                                        if let fixedColumns = rend["fixedColumns"] as? [[String: Any]],
+                                           let fixedCol = fixedColumns.first?["musicResponsiveListItemFixedColumnRenderer"] as? [String: Any],
+                                           let fixedRuns = (fixedCol["text"] as? [String: Any])?["runs"] as? [[String: Any]],
+                                           let durText = fixedRuns.first?["text"] as? String {
+                                            durationSeconds = self.parseDuration(durText)
+                                        }
+
                                         let song = SongItem(
                                             id: vid,
                                             title: trackTitle,
                                             artists: [Artist(name: artistName ?? "Artista")],
                                             album: Album(name: albumTitle, id: browseId),
-                                            duration: nil,
+                                            duration: durationSeconds,
                                             thumbnail: albumThumb
                                         )
                                         tracks.append(song)
@@ -526,22 +534,16 @@ public final class InnerTubeService: Sendable {
     }
 
     public func getStreamInfo(videoId: String, title: String? = nil, artist: String? = nil) async throws -> StreamInfo {
-        // Priority 1: Native Apple YouTube client (Direct unthrottled itag 140 AAC stream, 0.6s response, 100% success rate without login)
+        // Priority 1: Native Apple YouTube client (Direct unthrottled itag 140 AAC stream, ~400ms response, 100% success rate without login)
         do {
             let iosInfo = try await getIOSClientStreamInfo(videoId: videoId)
-            print("[InnerTubeService] Got direct IOS client stream for \(videoId) in ~600ms! Duration: \(iosInfo.duration ?? 0)s")
+            print("[InnerTubeService] Got direct IOS client stream for \(videoId) in ~400ms! Duration: \(iosInfo.duration ?? 0)s")
             return iosInfo
         } catch {
             print("[InnerTubeService] IOS client stream failed: \(error). Starting fallbacks...")
         }
 
-        // Priority 2: Direct VISIONOS fallback
-        if let visionInfo = await getVisionOSStreamInfo(videoId: videoId) {
-            print("[InnerTubeService] Got unrestricted VISIONOS stream! Duration: \(visionInfo.duration ?? 0)s")
-            return visionInfo
-        }
-
-        // Priority 3: Alternative YouTube Video Resolution (Same song, unrestricted upload)
+        // Priority 2: Alternative YouTube Video Resolution (Same song, unrestricted official upload)
         if let title = title, !title.isEmpty {
             let artistStr = artist ?? ""
             if let altInfo = await findPlayableAlternative(title: title, artist: artistStr, originalVideoId: videoId) {
@@ -550,7 +552,7 @@ public final class InnerTubeService: Sendable {
             }
         }
 
-        // Priority 4: JioSaavn Direct 320kbps / 160kbps High Fidelity CDN Stream
+        // Priority 3: JioSaavn Direct 320kbps / 160kbps High Fidelity CDN Stream
         if let title = title, !title.isEmpty {
             let artistStr = artist ?? ""
             if let saavnRes = await SaavnService.shared.getStreamInfo(title: title, artist: artistStr) {
@@ -559,17 +561,17 @@ public final class InnerTubeService: Sendable {
             }
         }
 
+        // Priority 4: Direct VISIONOS fallback (last resort)
+        if let visionInfo = await getVisionOSStreamInfo(videoId: videoId) {
+            print("[InnerTubeService] Got unrestricted VISIONOS stream! Duration: \(visionInfo.duration ?? 0)s")
+            return visionInfo
+        }
+
         throw URLError(.resourceUnavailable)
     }
 
     public func getFallbackStreamInfo(videoId: String, title: String? = nil, artist: String? = nil) async throws -> StreamInfo {
-        // Priority 1: Direct VISIONOS fallback
-        if let visionInfo = await getVisionOSStreamInfo(videoId: videoId) {
-            print("[InnerTubeService] Fallback: Got unrestricted VISIONOS stream! Duration: \(visionInfo.duration ?? 0)s")
-            return visionInfo
-        }
-
-        // Priority 2: Alternative YouTube Video Resolution (Same song, unrestricted upload)
+        // Priority 1: Alternative YouTube Video Resolution (Same song, unrestricted upload)
         if let title = title, !title.isEmpty {
             let artistStr = artist ?? ""
             if let altInfo = await findPlayableAlternative(title: title, artist: artistStr, originalVideoId: videoId) {
@@ -578,13 +580,19 @@ public final class InnerTubeService: Sendable {
             }
         }
 
-        // Priority 3: JioSaavn Direct 320kbps / 160kbps High Fidelity CDN Stream
+        // Priority 2: JioSaavn Direct 320kbps / 160kbps High Fidelity CDN Stream
         if let title = title, !title.isEmpty {
             let artistStr = artist ?? ""
             if let saavnRes = await SaavnService.shared.getStreamInfo(title: title, artist: artistStr) {
                 print("[InnerTubeService] Fallback: Found Saavn CDN audio stream for '\(title)'! Duration: \(saavnRes.duration ?? 0)s")
                 return StreamInfo(url: saavnRes.url, duration: saavnRes.duration)
             }
+        }
+
+        // Priority 3: Direct VISIONOS fallback
+        if let visionInfo = await getVisionOSStreamInfo(videoId: videoId) {
+            print("[InnerTubeService] Fallback: Got unrestricted VISIONOS stream! Duration: \(visionInfo.duration ?? 0)s")
+            return visionInfo
         }
 
         throw URLError(.resourceUnavailable)
@@ -628,7 +636,12 @@ public final class InnerTubeService: Sendable {
         }
 
         let songs = parseSearchSongs(from: json)
-        let candidates = songs.filter { $0.id != originalVideoId }
+        let cleanExpected = title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidates = songs.filter { candidate in
+            guard candidate.id != originalVideoId else { return false }
+            let cTitle = candidate.title.lowercased()
+            return cTitle.contains(cleanExpected) || cleanExpected.contains(cTitle)
+        }
 
         for candidate in candidates.prefix(3) {
             print("[InnerTubeService] Testing candidate alternative: '\(candidate.title)' (\(candidate.id))...")
@@ -750,9 +763,11 @@ public final class InnerTubeService: Sendable {
                 }
             }
 
-            // Priority 3: any audio
+            // Priority 3: any audio compatible with AVPlayer (NEVER WebM/Opus)
             for f in adaptiveFormats {
-                if let mime = f["mimeType"] as? String, mime.starts(with: "audio/"),
+                if let mime = f["mimeType"] as? String,
+                   (mime.contains("audio/mp4") || mime.contains("audio/aac") || mime.contains("audio/mpeg") || mime.contains("m4a")),
+                   !mime.contains("webm"), !mime.contains("opus"),
                    let urlStr = f["url"] as? String, let targetUrl = URL(string: urlStr) {
                     print("[InnerTubeService] Selected VISIONOS audio stream: \(mime)")
                     var dur: Double? = nil
@@ -852,10 +867,12 @@ public final class InnerTubeService: Sendable {
             }
         }
 
-        // 3. Fallback: any audio format with direct URL
+        // 3. Fallback: only AVPlayer-compatible audio formats with direct URL (NEVER WebM/Opus)
         if streamUrlString == nil {
             for format in adaptiveFormats {
-                if let mimeType = format["mimeType"] as? String, mimeType.starts(with: "audio/"),
+                if let mimeType = format["mimeType"] as? String,
+                   (mimeType.contains("audio/mp4") || mimeType.contains("audio/aac") || mimeType.contains("audio/mpeg") || mimeType.contains("m4a")),
+                   !mimeType.contains("webm"), !mimeType.contains("opus"),
                    let urlStr = format["url"] as? String {
                     streamUrlString = urlStr
                     if let msStr = format["approxDurationMs"] as? String, let ms = Double(msStr), ms > 0 {
@@ -1720,6 +1737,7 @@ actor VisitorManager {
         guard let url = URL(string: targetUrlStr) else { return cachedVisitorId }
 
         var req = URLRequest(url: url)
+        req.timeoutInterval = 2.5
         req.setValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
 
         do {
