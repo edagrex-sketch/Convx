@@ -27,6 +27,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
     private var playerItem: AVPlayerItem?
     private var timeObserverToken: Any?
     private var statusObserver: NSKeyValueObservation?
+    private var durationObserver: NSKeyValueObservation?
     private var timeControlStatusObserver: NSKeyValueObservation?
     private var currentDownloadTask: Task<Void, Never>?
     private var authoritativeDuration: Double = 0.0
@@ -160,9 +161,13 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         self.currentTime = 0.0
         self.hasTriggeredTrackEnd = false
 
-        let initialExpected = Double(track.duration ?? 180)
-        self.authoritativeDuration = initialExpected
-        self.duration = initialExpected
+        if let dur = track.duration, dur > 0 {
+            self.authoritativeDuration = Double(dur)
+            self.duration = Double(dur)
+        } else {
+            self.authoritativeDuration = 0.0
+            self.duration = 0.0
+        }
         self.lyrics = []
         self.currentLyricIndex = nil
 
@@ -438,7 +443,25 @@ public final class AudioPlayerService: NSObject, ObservableObject {
     }
 
     private func attachObservers(to avPlayer: AVPlayer, item: AVPlayerItem) {
-        // 1. Observe item status
+        // 1. Observe item duration dynamically from AVFoundation
+        self.durationObserver = item.observe(\.duration, options: [.initial, .new]) { [weak self] observedItem, _ in
+            let d = observedItem.duration.seconds
+            guard d.isFinite, d > 0 else { return }
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                // Guard against CoreMedia timescale 2x fMP4 anomaly (> 1.8x authoritative)
+                if self.authoritativeDuration > 0 && d > (self.authoritativeDuration * 1.8) {
+                    return
+                }
+                if d > self.duration || self.duration == 0.0 {
+                    self.duration = d
+                    self.updateNowPlayingProgress()
+                    print("[AudioPlayerService] Dynamic stream duration updated from AVPlayerItem: \(d)s")
+                }
+            }
+        }
+
+        // 2. Observe item status
         self.statusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] observedItem, _ in
             guard let self = self else { return }
             Task { @MainActor in
@@ -447,13 +470,13 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                     let itemDuration = observedItem.duration.seconds
                     if itemDuration.isFinite && itemDuration > 0 {
                         // Guard against CoreMedia's fMP4 timescale doubling bug (e.g., 438s vs 219s)
-                        if self.authoritativeDuration > 0 && itemDuration > (self.authoritativeDuration * 1.35) {
+                        if self.authoritativeDuration > 0 && itemDuration > (self.authoritativeDuration * 1.8) {
                             print("[AudioPlayerService] Detected CoreMedia fMP4 2x duration anomaly (reported: \(itemDuration)s vs authoritative: \(self.authoritativeDuration)s). Retaining true duration.")
                             self.duration = self.authoritativeDuration
                         } else {
-                            self.duration = itemDuration
+                            self.duration = max(self.duration, itemDuration)
                         }
-                    } else if self.authoritativeDuration > 0 {
+                    } else if self.authoritativeDuration > 0 && self.duration == 0 {
                         self.duration = self.authoritativeDuration
                     }
                     self.isLoading = false
@@ -478,8 +501,11 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                     }
                     // Auto-recovery: evict failed URL and attempt fallback stream
                     self.streamUrlCache.removeValue(forKey: track.id)
+                    let currentTrackId = track.id
                     Task { [weak self] in
-                        guard let self = self, self.currentTrack?.id == track.id else { return }
+                        guard let self = self else { return }
+                        let isStillSame = await MainActor.run { self.currentTrack?.id == currentTrackId }
+                        guard isStillSame else { return }
                         print("[AudioPlayerService] Auto-recovery: fetching fallback stream for '\(track.title)'...")
                         do {
                             let fallback = try await self.innerTube.getFallbackStreamInfo(
@@ -487,10 +513,12 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                                 title: track.title,
                                 artist: track.artistNames
                             )
-                            guard self.currentTrack?.id == track.id else { return }
-                            await self.playDirectStreamURL(url: fallback.url, initialDuration: Double(track.duration ?? 180))
+                            let isCurrent = await MainActor.run { self.currentTrack?.id == currentTrackId }
+                            guard isCurrent else { return }
+                            await self.playDirectStreamURL(url: fallback.url, initialDuration: Double(track.duration ?? 0))
                         } catch {
-                            guard self.currentTrack?.id == track.id else { return }
+                            let isCurrent = await MainActor.run { self.currentTrack?.id == currentTrackId }
+                            guard isCurrent else { return }
                             await MainActor.run {
                                 self.isLoading = false
                                 self.isPlaying = false
@@ -508,7 +536,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
             }
         }
 
-        // 2. Observe time control status
+        // 3. Observe time control status
         self.timeControlStatusObserver = avPlayer.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] p, _ in
             guard let self = self else { return }
             Task { @MainActor in
@@ -531,7 +559,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
             }
         }
 
-        // 3. Periodic time observer
+        // 4. Periodic time observer
         let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
         self.timeObserverToken = avPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self = self else { return }
@@ -542,21 +570,25 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                     self.updateCurrentLyric(for: cur)
                     DJEngineService.shared.checkTransition(currentTime: cur, duration: self.duration)
 
-                    // Auto-advance guard: only when song has actively played and truly reaches the end
-                    if !self.hasTriggeredTrackEnd && self.duration > 15.0 && cur > 15.0 && cur >= (self.duration - 0.5) {
-                        self.hasTriggeredTrackEnd = true
-                        print("[AudioPlayerService] Song finished naturally at \(cur)s (duration: \(self.duration)s). Auto-advancing...")
-                        if SleepTimerService.shared.currentOption == .endOfSong && SleepTimerService.shared.isActive {
-                            SleepTimerService.shared.handleTrackEndNatural()
-                        } else {
-                            self.skipNext()
+                    // Safety guard: only trigger if AVPlayer reached or exceeded the full track duration AND playback is halted,
+                    // in case the system notification was somehow dropped. Never cut off playing audio prematurely.
+                    if !self.hasTriggeredTrackEnd && self.duration > 10.0 && cur >= self.duration {
+                        let isPlaybackFinished = (self.player?.timeControlStatus != .playing) || (cur >= self.duration + 1.5)
+                        if isPlaybackFinished {
+                            self.hasTriggeredTrackEnd = true
+                            print("[AudioPlayerService] Song reached end via safety fallback guard at \(cur)s (duration: \(self.duration)s). Advancing...")
+                            if SleepTimerService.shared.currentOption == .endOfSong && SleepTimerService.shared.isActive {
+                                SleepTimerService.shared.handleTrackEndNatural()
+                            } else {
+                                self.skipNext()
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 4. End of track notification
+        // 5. End of track notification
         if let token = self.itemDidEndObserverToken {
             NotificationCenter.default.removeObserver(token)
             self.itemDidEndObserverToken = nil
@@ -591,6 +623,8 @@ public final class AudioPlayerService: NSObject, ObservableObject {
             NotificationCenter.default.removeObserver(token)
             itemDidEndObserverToken = nil
         }
+        durationObserver?.invalidate()
+        durationObserver = nil
         statusObserver?.invalidate()
         statusObserver = nil
         timeControlStatusObserver?.invalidate()

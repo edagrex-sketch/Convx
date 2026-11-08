@@ -725,9 +725,11 @@ public final class InnerTubeService: Sendable {
                 if let itag = f["itag"] as? Int, itag == 140,
                    let urlStr = f["url"] as? String, let targetUrl = URL(string: urlStr) {
                     print("[InnerTubeService] Selected VISIONOS itag 140 stream")
-                    var dur = authorDuration
-                    if dur == nil, let msStr = f["approxDurationMs"] as? String, let ms = Double(msStr) {
+                    var dur: Double? = nil
+                    if let msStr = f["approxDurationMs"] as? String, let ms = Double(msStr), ms > 0 {
                         dur = ms / 1000.0
+                    } else {
+                        dur = authorDuration
                     }
                     return StreamInfo(url: targetUrl, duration: dur)
                 }
@@ -738,9 +740,11 @@ public final class InnerTubeService: Sendable {
                 if let mime = f["mimeType"] as? String, mime.contains("audio/mp4"),
                    let urlStr = f["url"] as? String, let targetUrl = URL(string: urlStr) {
                     print("[InnerTubeService] Selected VISIONOS audio/mp4 stream")
-                    var dur = authorDuration
-                    if dur == nil, let msStr = f["approxDurationMs"] as? String, let ms = Double(msStr) {
+                    var dur: Double? = nil
+                    if let msStr = f["approxDurationMs"] as? String, let ms = Double(msStr), ms > 0 {
                         dur = ms / 1000.0
+                    } else {
+                        dur = authorDuration
                     }
                     return StreamInfo(url: targetUrl, duration: dur)
                 }
@@ -751,9 +755,11 @@ public final class InnerTubeService: Sendable {
                 if let mime = f["mimeType"] as? String, mime.starts(with: "audio/"),
                    let urlStr = f["url"] as? String, let targetUrl = URL(string: urlStr) {
                     print("[InnerTubeService] Selected VISIONOS audio stream: \(mime)")
-                    var dur = authorDuration
-                    if dur == nil, let msStr = f["approxDurationMs"] as? String, let ms = Double(msStr) {
+                    var dur: Double? = nil
+                    if let msStr = f["approxDurationMs"] as? String, let ms = Double(msStr), ms > 0 {
                         dur = ms / 1000.0
+                    } else {
+                        dur = authorDuration
                     }
                     return StreamInfo(url: targetUrl, duration: dur)
                 }
@@ -818,14 +824,14 @@ public final class InnerTubeService: Sendable {
 
         // Prefer itag 140 (m4a AAC ~128kbps) for AVPlayer, or any audio/mp4 format
         var streamUrlString: String?
-        var formatDuration: Double? = authorDuration
+        var formatDuration: Double? = nil
 
         // 1. First priority: itag 140 (native AAC)
         for format in adaptiveFormats {
             if let itag = format["itag"] as? Int, itag == 140,
                let urlStr = format["url"] as? String {
                 streamUrlString = urlStr
-                if formatDuration == nil, let msStr = format["approxDurationMs"] as? String, let ms = Double(msStr) {
+                if let msStr = format["approxDurationMs"] as? String, let ms = Double(msStr), ms > 0 {
                     formatDuration = ms / 1000.0
                 }
                 break
@@ -838,7 +844,7 @@ public final class InnerTubeService: Sendable {
                 if let mimeType = format["mimeType"] as? String, mimeType.contains("audio/mp4"),
                    let urlStr = format["url"] as? String {
                     streamUrlString = urlStr
-                    if formatDuration == nil, let msStr = format["approxDurationMs"] as? String, let ms = Double(msStr) {
+                    if let msStr = format["approxDurationMs"] as? String, let ms = Double(msStr), ms > 0 {
                         formatDuration = ms / 1000.0
                     }
                     break
@@ -852,12 +858,16 @@ public final class InnerTubeService: Sendable {
                 if let mimeType = format["mimeType"] as? String, mimeType.starts(with: "audio/"),
                    let urlStr = format["url"] as? String {
                     streamUrlString = urlStr
-                    if formatDuration == nil, let msStr = format["approxDurationMs"] as? String, let ms = Double(msStr) {
+                    if let msStr = format["approxDurationMs"] as? String, let ms = Double(msStr), ms > 0 {
                         formatDuration = ms / 1000.0
                     }
                     break
                 }
             }
+        }
+
+        if formatDuration == nil {
+            formatDuration = authorDuration
         }
 
         guard let streamUrlString = streamUrlString, let targetUrl = URL(string: streamUrlString) else {
