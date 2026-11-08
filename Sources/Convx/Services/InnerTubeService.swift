@@ -562,6 +562,34 @@ public final class InnerTubeService: Sendable {
         throw URLError(.resourceUnavailable)
     }
 
+    public func getFallbackStreamInfo(videoId: String, title: String? = nil, artist: String? = nil) async throws -> StreamInfo {
+        // Priority 1: Direct VISIONOS fallback
+        if let visionInfo = await getVisionOSStreamInfo(videoId: videoId) {
+            print("[InnerTubeService] Fallback: Got unrestricted VISIONOS stream! Duration: \(visionInfo.duration ?? 0)s")
+            return visionInfo
+        }
+
+        // Priority 2: Alternative YouTube Video Resolution (Same song, unrestricted upload)
+        if let title = title, !title.isEmpty {
+            let artistStr = artist ?? ""
+            if let altInfo = await findPlayableAlternative(title: title, artist: artistStr, originalVideoId: videoId) {
+                print("[InnerTubeService] Fallback: Found playable alternative YouTube track for '\(title)'! Duration: \(altInfo.duration ?? 0)s")
+                return altInfo
+            }
+        }
+
+        // Priority 3: JioSaavn Direct 320kbps / 160kbps High Fidelity CDN Stream
+        if let title = title, !title.isEmpty {
+            let artistStr = artist ?? ""
+            if let saavnUrl = await SaavnService.shared.getStreamUrl(title: title, artist: artistStr) {
+                print("[InnerTubeService] Fallback: Found Saavn CDN audio stream for '\(title)'!")
+                return StreamInfo(url: saavnUrl, duration: nil)
+            }
+        }
+
+        throw URLError(.resourceUnavailable)
+    }
+
     // MARK: - Alternative Track Resolution (For Disney / Restricted Tracks)
     public func findPlayableAlternative(title: String, artist: String, originalVideoId: String) async -> StreamInfo? {
         let query = "\(title) \(artist)".trimmingCharacters(in: .whitespacesAndNewlines)

@@ -35,6 +35,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
     private var prefetchTask: Task<Void, Never>?
     private var lyricsTask: Task<Void, Never>?
     private var watchdogTask: Task<Void, Never>?
+    private var itemDidEndObserverToken: Any?
 
     private let innerTube = InnerTubeService.shared
     private let saavn = SaavnService.shared
@@ -187,32 +188,33 @@ public final class AudioPlayerService: NSObject, ObservableObject {
 
         // 6. Two-Stage Stall & Zero-Sound Watchdog (Guarantees zero silent stalls at 0:00)
         watchdogTask = Task { [weak self] in
-            // Stage 1 (2.5s): Audio stalled at 0:00 -> kickstart hardware output & play
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            // Stage 1 (3.0s): Audio stalled at 0:00 -> kickstart hardware output & play
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard let self = self, !Task.isCancelled, self.currentTrack?.id == track.id else { return }
             await MainActor.run {
-                if self.currentTime == 0.0 || !self.isPlaying {
-                    print("[AudioPlayerService] Watchdog Stage 1 (2.5s): audio at 0.0s, kickstarting AVPlayer...")
+                if (self.currentTime == 0.0 || !self.isPlaying) && self.player?.timeControlStatus != .playing {
+                    print("[AudioPlayerService] Watchdog Stage 1 (3.0s): audio at 0.0s, kickstarting AVPlayer...")
                     self.setupAudioSession()
                     self.player?.volume = 1.0
-                    self.player?.isMuted = false
-                    self.player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
                     let speed = SleepTimerService.shared.selectedSpeed.rate
-                    self.player?.playImmediately(atRate: speed)
+                    self.player?.play()
+                    if speed != 1.0 {
+                        self.player?.rate = speed
+                    }
                     self.isLoading = false
                 }
             }
 
-            // Stage 2 (5.0s): Stream completely dead at 0:00 -> flush cache and switch to alternative stream source
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            // Stage 2 (6.0s): Stream completely dead at 0:00 -> flush cache and switch to alternative stream source
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
             await MainActor.run {
-                if self.currentTime == 0.0 {
-                    print("[AudioPlayerService] Watchdog Stage 2 (5.0s): stream URL stalled at 0.0s. Resolving fresh fallback...")
+                if self.currentTime == 0.0 && self.player?.timeControlStatus != .playing {
+                    print("[AudioPlayerService] Watchdog Stage 2 (6.0s): stream URL stalled at 0.0s. Resolving fresh fallback...")
                     self.streamUrlCache.removeValue(forKey: track.id)
                     Task { [weak self] in
                         guard let self = self, !Task.isCancelled, self.currentTrack?.id == track.id else { return }
-                        if let freshStream = try? await self.innerTube.getStreamInfo(
+                        if let freshStream = try? await self.innerTube.getFallbackStreamInfo(
                             videoId: track.id,
                             title: track.title,
                             artist: track.artistNames
@@ -375,28 +377,24 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         await MainActor.run {
             self.setupAudioSession()
 
-            let userAgent = "com.google.ios.youtube/21.03.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)"
+            let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
             let asset = AVURLAsset(url: url, options: [
                 "AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": userAgent],
                 AVURLAssetPreferPreciseDurationAndTimingKey: false
             ])
             let item = AVPlayerItem(asset: asset)
-            item.preferredForwardBufferDuration = 0
             item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
             item.audioTimePitchAlgorithm = .timeDomain
             self.playerItem = item
 
             if let p = self.player {
                 p.replaceCurrentItem(with: item)
-                p.automaticallyWaitsToMinimizeStalling = false
+                p.automaticallyWaitsToMinimizeStalling = true
                 p.volume = 1.0
-                p.isMuted = false
-                p.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             } else {
                 let avPlayer = AVPlayer(playerItem: item)
-                avPlayer.automaticallyWaitsToMinimizeStalling = false
+                avPlayer.automaticallyWaitsToMinimizeStalling = true
                 avPlayer.volume = 1.0
-                avPlayer.isMuted = false
                 self.player = avPlayer
             }
 
@@ -405,8 +403,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
             }
 
             self.attachObservers(to: self.player!, item: item)
-            let speed = SleepTimerService.shared.selectedSpeed.rate
-            self.player?.playImmediately(atRate: speed)
+            self.player?.play()
         }
     }
 
@@ -422,15 +419,12 @@ public final class AudioPlayerService: NSObject, ObservableObject {
 
             if let p = self.player {
                 p.replaceCurrentItem(with: item)
-                p.automaticallyWaitsToMinimizeStalling = false
+                p.automaticallyWaitsToMinimizeStalling = true
                 p.volume = 1.0
-                p.isMuted = false
-                p.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             } else {
                 let avPlayer = AVPlayer(playerItem: item)
-                avPlayer.automaticallyWaitsToMinimizeStalling = false
+                avPlayer.automaticallyWaitsToMinimizeStalling = true
                 avPlayer.volume = 1.0
-                avPlayer.isMuted = false
                 self.player = avPlayer
             }
 
@@ -439,8 +433,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
             }
 
             self.attachObservers(to: self.player!, item: item)
-            let speed = SleepTimerService.shared.selectedSpeed.rate
-            self.player?.playImmediately(atRate: speed)
+            self.player?.play()
         }
     }
 
@@ -466,21 +459,47 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                     self.isLoading = false
                     self.isPlaying = true
                     let speed = SleepTimerService.shared.selectedSpeed.rate
-                    self.player?.volume = 1.0
-                    self.player?.isMuted = false
-                    self.player?.playImmediately(atRate: speed)
-                    self.updateNowPlayingProgress()
-                    BrainwaveModulatorService.shared.adaptCarrierToCurrentSong()
-                    print("[AudioPlayerService] AVPlayerItem readyToPlay! Duration: \(self.duration)s, rate: \(self.player?.rate ?? 0)")
-                case .failed:
-                    self.isLoading = false
-                    self.isPlaying = false
-                    if let curId = self.currentTrack?.id {
-                        self.streamUrlCache.removeValue(forKey: curId)
+                    if speed != 1.0 {
+                        self.player?.rate = speed
+                    } else {
+                        self.player?.play()
                     }
                     self.updateNowPlayingProgress()
+                    BrainwaveModulatorService.shared.adaptCarrierToCurrentSong()
+                    print("[AudioPlayerService] AVPlayerItem readyToPlay! Duration: \(self.duration)s")
+
+                case .failed:
                     print("[AudioPlayerService] AVPlayerItem failed: \(observedItem.error?.localizedDescription ?? "unknown error")")
-                    HUDService.shared.show(icon: "exclamationmark.circle", iconColor: .orange, title: "Error de audio", subtitle: "No se pudo reproducir este formato")
+                    guard let track = self.currentTrack else {
+                        self.isLoading = false
+                        self.isPlaying = false
+                        self.updateNowPlayingProgress()
+                        return
+                    }
+                    // Auto-recovery: evict failed URL and attempt fallback stream
+                    self.streamUrlCache.removeValue(forKey: track.id)
+                    Task { [weak self] in
+                        guard let self = self, self.currentTrack?.id == track.id else { return }
+                        print("[AudioPlayerService] Auto-recovery: fetching fallback stream for '\(track.title)'...")
+                        do {
+                            let fallback = try await self.innerTube.getFallbackStreamInfo(
+                                videoId: track.id,
+                                title: track.title,
+                                artist: track.artistNames
+                            )
+                            guard self.currentTrack?.id == track.id else { return }
+                            await self.playDirectStreamURL(url: fallback.url, initialDuration: Double(track.duration ?? 180))
+                        } catch {
+                            guard self.currentTrack?.id == track.id else { return }
+                            await MainActor.run {
+                                self.isLoading = false
+                                self.isPlaying = false
+                                self.updateNowPlayingProgress()
+                                HUDService.shared.show(icon: "exclamationmark.circle", iconColor: .orange, title: "Error de audio", subtitle: "No se pudo reproducir este formato")
+                            }
+                        }
+                    }
+
                 case .unknown:
                     break
                 @unknown default:
@@ -503,9 +522,7 @@ public final class AudioPlayerService: NSObject, ObservableObject {
                     self.isLoading = false
                     self.updateNowPlayingProgress()
                 case .waitingToPlayAtSpecifiedRate:
-                    let speed = SleepTimerService.shared.selectedSpeed.rate
-                    p.playImmediately(atRate: speed)
-                    if self.currentTime == 0 {
+                    if self.currentTime == 0 && !self.isPlaying {
                         self.isLoading = true
                     }
                 @unknown default:
@@ -540,7 +557,11 @@ public final class AudioPlayerService: NSObject, ObservableObject {
         }
 
         // 4. End of track notification
-        NotificationCenter.default.addObserver(
+        if let token = self.itemDidEndObserverToken {
+            NotificationCenter.default.removeObserver(token)
+            self.itemDidEndObserverToken = nil
+        }
+        self.itemDidEndObserverToken = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main
@@ -566,16 +587,18 @@ public final class AudioPlayerService: NSObject, ObservableObject {
             player?.removeTimeObserver(token)
             timeObserverToken = nil
         }
+        if let token = itemDidEndObserverToken {
+            NotificationCenter.default.removeObserver(token)
+            itemDidEndObserverToken = nil
+        }
         statusObserver?.invalidate()
         statusObserver = nil
         timeControlStatusObserver?.invalidate()
         timeControlStatusObserver = nil
 
-        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
         DJEngineService.shared.resetTransition()
 
         player?.pause()
-        player?.replaceCurrentItem(with: nil)
         playerItem = nil
     }
 
